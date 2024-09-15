@@ -1,0 +1,5 @@
+if(EXISTS "/Users/devangjaiswal/CLionProjects/redisv2/cmake-build-debug/data_structure_tests[1]_tests.cmake")
+  include("/Users/devangjaiswal/CLionProjects/redisv2/cmake-build-debug/data_structure_tests[1]_tests.cmake")
+else()
+  add_test(data_structure_tests_NOT_BUILT data_structure_tests_NOT_BUILT)
+endif()
