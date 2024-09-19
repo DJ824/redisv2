@@ -97,19 +97,24 @@ public:
         return true;
     }
 
-    std::optional<int64_t> incrby(const std::string& key, int& amt) {
+    std::optional<int64_t> incrby(const std::string& key, int amt) {
         auto it = strings_.find(key);
         if (it == strings_.end()) {
-            return std::nullopt;
+            strings_[key] = "0";
+            it = strings_.find(key);
         }
-        int64_t val = atoi(strings_[key].c_str());
 
-        if (!isdigit(val)) {
+        int64_t val;
+        try {
+            val = std::stoll(it->second);
+        } catch (const std::invalid_argument& e) {
+            return std::nullopt;
+        } catch (const std::out_of_range& e) {
             return std::nullopt;
         }
 
         val += amt;
-        strings_[key] = std::to_string(val);
+        it->second = std::to_string(val);
         return val;
     }
 
@@ -126,7 +131,7 @@ public:
             return std::nullopt;
         } else {
             auto val = lists_[key].front();
-            lists_[key].pop_back();
+            lists_[key].pop_front();
             return val;
         }
     }
@@ -171,39 +176,19 @@ public:
             } else {
                 lists_[key1].push_back(val);
             }
-            return std::nullopt; // Invalid direction
+            return std::nullopt;
         }
 
         return val;
     }
 
     std::optional<std::vector<std::string>> lrange(const std::string& key, int start, int stop) {
-        if (lists_.find(key) == lists_.end()) {
-            return std::nullopt;
-        }
-        std::vector<std::string> result;
-
-        auto it = lists_[key].begin();
-        int diff = stop - start;
-        while (start > 0) {
-            ++it;
-        }
-
-        while (diff > 0 || it != lists_[key].end()) {
-            result.push_back(*it);
-            ++it;
-        }
-
-        return result;
-    }
-
-    bool ltrim(const std::string& key, int start, int stop) {
         auto it = lists_.find(key);
         if (it == lists_.end()) {
-            return false;
+            return std::nullopt;
         }
 
-        auto& list = it->second;
+        const auto& list = it->second;
         int size = static_cast<int>(list.size());
 
         if (start < 0) {
@@ -217,27 +202,57 @@ public:
         stop = std::min(stop, size - 1);
 
         if (start > stop || start >= size) {
-            list.clear();
-            return true;
+            return std::vector<std::string>();
         }
 
-        list.erase(list.begin(), std::next(list.begin(), start));
+        std::vector<std::string> result;
+        auto it_start = list.begin();
+        std::advance(it_start, start);
 
-        if (stop + 1 < list.size()) {
-            list.erase(std::next(list.begin(), stop - start + 1), list.end());
+        auto it_stop = list.begin();
+        std::advance(it_stop, stop + 1);
+
+        result.insert(result.end(), it_start, it_stop);
+        return result;
+    }
+
+    bool ltrim(const std::string& key, int start, int stop) {
+        auto it = lists_.find(key);
+        if (it == lists_.end()) {
+            return false;
+        }
+
+        auto& list = it->second;
+        int size = static_cast<int>(list.size());
+
+        if (start < 0) start = std::max(size + start, 0);
+        if (stop < 0) stop = std::max(size + stop, 0);
+
+        start = std::min(start, size);
+        stop = std::min(stop, size - 1);
+
+        if (start > stop || start >= size) {
+            list.clear();
+        } else {
+            auto it_start = list.begin();
+            std::advance(it_start, start);
+
+            auto it_stop = list.begin();
+            std::advance(it_stop, stop + 1);
+
+            list.erase(list.begin(), it_start);
+            list.erase(it_stop, list.end());
         }
 
         return true;
     }
 
     std::optional<int64_t> sadd(const std::string& key, const std::string member) {
-        if (sets_.find(key) == sets_.end()) {
-            return std::nullopt;
-        }
 
         if (sets_[key].find(member) != sets_[key].end()) {
             return 0;
         }
+
         sets_[key].insert(member);
         return 1;
     }
@@ -273,7 +288,6 @@ public:
         auto prev = it;
         ++it;
 
-
         while (it != keys.end()) {
             if (sets_.find(*it) == sets_.end() || sets_.find(*prev) == sets_.end()) {
                 return std::nullopt;
@@ -292,31 +306,32 @@ public:
         return sets_.find(key)->second.size();
     }
 
-    int64_t hset(const std::string& key, const std::vector<std::pair<std::string, std::string>> fields) {
-        if (hashes_.find(key) == hashes_.end()) {
-            return 0;
-        }
+    int64_t hset(const std::string& key, const std::vector<std::pair<std::string, std::string>>& fields) {
+        auto& hash = hashes_[key];
 
-        auto it = fields.begin();
-        int ct = 0;
-        while (it != fields.end()) {
-            hashes_[key][it->first] = it->second;
-            ++it;
-            ++ct;
+        int64_t ct = 0;
+        for (const auto& [field, value] : fields) {
+            auto [it, inserted] = hash.insert_or_assign(field, value);
+            if (inserted) {
+                ++ct;
+            }
         }
 
         return ct;
     }
 
     std::optional<std::string> hget(const std::string& key, const std::string& field) {
-        if (hashes_.find(key) == hashes_.end()) {
+        auto hash_it = hashes_.find(key);
+        if (hash_it == hashes_.end()) {
             return std::nullopt;
         }
 
-        if (hashes_[key][field] != "") {
-            return nullptr;
+        auto field_it = hash_it->second.find(field);
+        if (field_it == hash_it->second.end()) {
+            return std::nullopt;
         }
-        return hashes_[key][field];
+
+        return field_it->second;
     }
 
     std::optional<std::vector<std::string>> hmget(const std::string& key, const std::vector<std::string> fields) {
@@ -336,22 +351,31 @@ public:
         return result;
     }
 
-    std::optional<int> hincrby(const std::string& key, const std::string& field, int val) {
-        if (hashes_.find(key) == hashes_.end()) {
+    std::optional<int64_t> hincrby(const std::string& key, const std::string& field, int64_t increment) {
+        auto hash_it = hashes_.find(key);
+        if (hash_it == hashes_.end()) {
             return std::nullopt;
         }
 
-        auto curr = atoi(hashes_[key][field].c_str());
+        auto& hash = hash_it->second;
+        auto field_it = hash.find(field);
 
-        if (isdigit(curr)) {
-            curr += val;
-            hashes_[key][field] = curr;
+        int64_t curr_value = 0;
+        if (field_it != hash.end()) {
+            try {
+                curr_value = std::stoll(field_it->second);
+            } catch (const std::exception&) {
+                return std::nullopt;
+            }
+        } else {
+            hash[field] = "0";
         }
 
-        return curr;
+        int64_t new_value = curr_value + increment;
+        hash[field] = std::to_string(new_value);
+
+        return new_value;
     }
-
-
 
 
 
