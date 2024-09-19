@@ -1,13 +1,18 @@
 # Redis Clone
 
-This project is a simplified clone of Redis, implementing some of the basic functionality of a Redis server with a focus on sorted sets (ZSETs). It uses a client-server architecture and is built with C++ and Boost.Asio for networking.
+This project is a comprehensive clone of Redis, implementing a wide range of functionality found in a Redis server. It uses a client-server architecture and is built with C++ and Boost.Asio for networking.
 
 ## Features
 
-- Sorted Set (ZSET) implementation using a Skip List data structure
+- Multiple data structure implementations:
+  - Sorted Sets (ZSETs) using Skip List
+  - Strings
+  - Lists
+  - Sets
+  - Hashes
 - Server-client architecture using Boost.Asio
-- Support for basic ZSET operations: ZADD, ZREM, ZSCORE, ZRANGE, ZQUERY
-- Unit tests using Google Test
+- Support for various operations on each data structure
+- Comprehensive unit tests using Google Test
 
 ## Design Overview
 
@@ -15,44 +20,89 @@ The project is structured into several key components:
 
 1. **Server**: Handles client connections and requests using Boost.Asio for asynchronous I/O.
 2. **Client**: Provides a command-line interface for sending requests to the server.
-3. **DataStore**: Manages the in-memory data storage, particularly the ZSETs.
+3. **DataStore**: Manages the in-memory data storage for all supported data structures.
 4. **SkipList**: Implements the core data structure for efficient sorted set operations.
 
-### Skip List Implementation
+### Data Structures
 
-The Skip List is used as the underlying data structure for ZSETs, providing efficient insertion, deletion, and range query operations. 
-It maintains multiple layers of linked lists, with each layer being a subset of the layer below, allowing for faster traversal.
+1. **Sorted Sets (ZSETs)**: Implemented using Skip List for efficient sorted operations.
+2. **Strings**: Simple key-value storage for string data.
+3. **Lists**: Doubly linked lists for fast insertion and deletion at both ends.
+4. **Sets**: Unordered collections of unique elements.
+5. **Hashes**: Hash tables storing fields and values.
 
 ## Time Complexities
 
 Here are the time complexities for the main operations:
 
-- **ZADD** (Insert/Update): O(log N) average case, where N is the number of elements in the sorted set.
-  - In the worst case (when inserting an element with the highest level), it can be O(N), but this is rare due to the probabilistic nature of the skip list.
+### Sorted Sets (ZSETs)
+- ZADD: O(log N)
+- ZREM: O(log N)
+- ZSCORE: O(log N)
+- ZRANGE: O(log N + M)
+- ZQUERY: O(log N + M)
 
-- **ZREM** (Remove): O(log N) average and worst case.
+### Strings
+- GET/SET: O(1)
+- INCR/DECR: O(1)
 
-- **ZSCORE** (Get score): O(log N) average and worst case.
+### Lists
+- LPUSH/RPUSH: O(1)
+- LPOP/RPOP: O(1)
+- LRANGE: O(N)
 
-- **ZRANGE** (Range query): O(log N + M), where N is the total number of elements and M is the number of elements in the specified range.
+### Sets
+- SADD/SREM: O(1)
+- SISMEMBER: O(1)
+- SINTER: O(N * M) where N is the size of the smallest set
 
-- **ZQUERY** (Complex range query): O(log N + M), where N is the total number of elements and M is the number of elements in the result set.
-
-The space complexity of the Skip List is O(N) on average, with an additional O(log N) space for the multiple levels.
+### Hashes
+- HSET/HGET: O(1)
+- HINCRBY: O(1)
 
 ## Supported Commands
 
-The following ZSET commands are supported:
+### Sorted Sets (ZSETs)
+- `ZADD key score member`
+- `ZREM key member`
+- `ZSCORE key member`
+- `ZRANGE key min_score max_score offset count`
+- `ZQUERY key min_score min_member max_score max_member offset count`
 
-1. `ZADD key score member`: Add a member with the specified score to the sorted set.
-2. `ZREM key member`: Remove the specified member from the sorted set.
-3. `ZSCORE key member`: Get the score of the specified member in the sorted set.
-4. `ZRANGE key min_score max_score offset count`: Get members within the specified score range.
-5. `ZQUERY key min_score min_member max_score max_member offset count`: Complex range query on the sorted set.
+### Strings
+- `SET key value`
+- `GET key`
+- `DEL key`
+- `INCRBY key increment`
+
+### Lists
+- `LPUSH key value`
+- `RPUSH key value`
+- `LPOP key`
+- `RPOP key`
+- `LLEN key`
+- `LRANGE key start stop`
+- `LTRIM key start stop`
+
+### Sets
+- `SADD key member`
+- `SREM key member`
+- `SISMEMBER key member`
+- `SINTER key [key ...]`
+- `SCARD key`
+
+### Hashes
+- `HSET key field value`
+- `HGET key field`
+- `HMGET key field [field ...]`
+- `HINCRBY key field increment`
 
 ## Future Improvements
 
 - Implement persistence (saving to disk)
-- Add support for more Redis data types (Lists, Hashes, etc.)
+- Add support for more Redis commands and data types
 - Implement pub/sub functionality
 - Add authentication and access control
+- Optimize memory usage
+- Implement distributed system features (replication, sharding)
+
