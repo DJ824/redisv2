@@ -28,6 +28,7 @@ private:
     int level_;
     std::mt19937 gen_;
     std::uniform_real_distribution<> dis_;
+    mutable std::mutex mutex_;
 
     int randomLevel() {
         int lvl = 1;
@@ -35,6 +36,19 @@ private:
             ++lvl;
         }
         return lvl;
+    }
+
+    void printDebug(const std::string& operation, const std::string& member, double score) const {
+        std::cout << operation << ": member=" << member << ", score=" << score << std::endl;
+        for (int i = 0; i < level_; ++i) {
+            std::cout << "Level " << i << ": ";
+            Node* node = head_->forward_[i];
+            while (node) {
+                std::cout << "(" << node->member_ << "," << node->score_ << ") ";
+                node = node->forward_[i];
+            }
+            std::cout << std::endl;
+        }
     }
 
 public:
@@ -50,36 +64,34 @@ public:
             current = next;
         }
     }
-
     bool insert(const std::string &member, double score) {
+        std::lock_guard<std::mutex> lock(mutex_);
         std::vector<Node *> update(MAX_LEVEL_);
-        auto x = head_;
+        Node *x = head_;
 
         for (int i = level_ - 1; i >= 0; --i) {
-            while (x->forward_[i] && (x->forward_[i]->score_ < score ||
-                                      (x->forward_[i]->score_ == score && x->forward_[i]->member_ < member))) {
+            while (x->forward_[i] && x->forward_[i]->member_ < member) {
                 x = x->forward_[i];
             }
             update[i] = x;
         }
-        //x = x->forward_[0];
+        x = x->forward_[0];
 
         if (x && x->member_ == member) {
             x->score_ = score;
             return false;
         }
 
-        int newLevel = randomLevel();
-        if (newLevel > level_) {
-            for (int i = level_; i < newLevel; ++i) {
+        int new_level = randomLevel();
+        if (new_level > level_) {
+            for (int i = level_; i < new_level; ++i) {
                 update[i] = head_;
             }
-            level_ = newLevel;
+            level_ = new_level;
         }
 
-        x = new Node(member, score, newLevel);
-
-        for (int i = 0; i < newLevel; ++i) {
+        x = new Node(member, score, new_level);
+        for (int i = 0; i < new_level; ++i) {
             x->forward_[i] = update[i]->forward_[i];
             update[i]->forward_[i] = x;
         }
@@ -88,6 +100,8 @@ public:
     }
 
     bool remove(const std::string &member) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
         std::vector<Node *> update(MAX_LEVEL_);
         auto x = head_;
 
@@ -138,6 +152,8 @@ public:
 
     std::vector<std::pair<std::string, double>>
     range(double min_score, double max_score, int64_t offset, int64_t count) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
         std::vector<std::pair<std::string, double>> result;
         auto x = head_;
 
@@ -163,6 +179,8 @@ public:
     }
 
     void range_delete(double min_score, double max_score, int64_t offset, int64_t count) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
         std::vector<Node *> update(MAX_LEVEL_);
         auto x = head_;
         for (int i = level_ - 1; i >= 0; --i) {
@@ -198,6 +216,8 @@ public:
     std::vector<std::pair<std::string, double>> query(double min_score, const std::string &min_member,
                                                       double max_score, const std::string &max_member,
                                                       int64_t offset, int64_t count) {
+        std::lock_guard<std::mutex> lock(mutex_);
+
         std::vector<std::pair<std::string, double>> result;
         auto x = head_;
 

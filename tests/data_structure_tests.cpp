@@ -1,4 +1,7 @@
 #include <gtest/gtest.h>
+#include <thread>
+#include <vector>
+#include <atomic>
 #include "../structures/data_store.cpp"
 
 class SkipListTest : public ::testing::Test {
@@ -17,9 +20,19 @@ EXPECT_EQ(list.score("c"), 3.0);
 }
 
 TEST_F(SkipListTest, InsertDuplicate) {
-EXPECT_TRUE(list.insert("a", 1.0));
-EXPECT_FALSE(list.insert("a", 2.0));
-EXPECT_EQ(list.score("a"), 2.0);
+    std::cout << "Inserting 'a' with score 1.0" << std::endl;
+    EXPECT_TRUE(list.insert("a", 1.0));
+
+    auto score = list.score("a");
+    EXPECT_TRUE(score.has_value());
+    EXPECT_DOUBLE_EQ(*score, 1.0);
+
+    std::cout << "Inserting 'a' again with score 2.0" << std::endl;
+    EXPECT_FALSE(list.insert("a", 2.0));
+
+    score = list.score("a");
+    EXPECT_TRUE(score.has_value());
+    EXPECT_DOUBLE_EQ(*score, 2.0);
 }
 
 TEST_F(SkipListTest, Remove) {
@@ -88,7 +101,7 @@ protected:
 
 TEST_F(DataStoreTest, ZAdd) {
     EXPECT_TRUE(store.zadd("myset", 1.0, "a"));
-    EXPECT_FALSE(store.zadd("myset", 2.0, "a")); 
+    EXPECT_FALSE(store.zadd("myset", 2.0, "a"));
     EXPECT_TRUE(store.zadd("myset", 3.0, "b"));
 }
 
@@ -428,6 +441,172 @@ TEST_F(DataStoreTest, HIncrBy) {
 
     result = store.hincrby("nonexistent", "counter", 5);
     EXPECT_FALSE(result.has_value());
+}
+
+class DataStoreThreadTest : public ::testing::Test {
+protected:
+    DataStore store;
+};
+
+TEST_F(DataStoreThreadTest, ConcurrentReads) {
+    store.zadd("key1", 1.0, "member1");
+    store.zadd("key1", 2.0, "member2");
+
+    std::atomic<int> successful_reads(0);
+
+    auto read_func = [&]() {
+        for (int i = 0; i < 1000; ++i) {
+            auto score = store.zscore("key1", "member1");
+            if (score && *score == 1.0) {
+                successful_reads++;
+            }
+        }
+    };
+
+    std::vector<std::thread> threads;
+    for (int i = 0; i < 10; ++i) {
+        threads.emplace_back(read_func);
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    EXPECT_EQ(successful_reads, 10000);
+}
+
+TEST_F(DataStoreThreadTest, ConcurrentWrites) {
+    std::atomic<int> successful_writes(0);
+    std::atomic<int> total_attempts(0);
+
+    auto write_func = [&](int thread_id) {
+        for (int i = 0; i < 100; ++i) {
+            double score = static_cast<double>(i * 100 + thread_id);
+            std::string member = "member" + std::to_string(i) + "_" + std::to_string(thread_id);
+            bool result = store.zadd("key2", score, member);
+            total_attempts++;
+            if (result) {
+                successful_writes++;
+            }
+        }
+    };
+
+    std::vector<std::thread> threads;
+    for (int i = 0; i < 10; ++i) {
+        threads.emplace_back(write_func, i);
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    auto result = store.zquery("key2", 0, "", std::numeric_limits<double>::max(), "", 0, 1000);
+    auto final_size = result.size();
+
+    std::cout << "Final size: " << final_size << std::endl;
+    std::cout << "Successful writes: " << successful_writes << std::endl;
+    std::cout << "Total attempts: " << total_attempts << std::endl;
+
+    EXPECT_EQ(final_size, 1000);
+    EXPECT_EQ(total_attempts, 1000);
+    EXPECT_EQ(successful_writes, 1000);
+
+    std::set<std::string> expected_members;
+    for (int i = 0; i < 10; ++i) {
+        for (int j = 0; j < 100; ++j) {
+            expected_members.insert("member" + std::to_string(j) + "_" + std::to_string(i));
+        }
+    }
+
+    std::set<std::string> actual_members;
+    for (const auto& pair : result) {
+        actual_members.insert(pair.first);
+    }
+
+    EXPECT_EQ(expected_members, actual_members);
+}
+TEST_F(DataStoreThreadTest, MixedReadWrites) {
+    std::atomic<int> successful_ops(0);
+
+    auto mixed_func = [&](int thread_id) {
+        for (int i = 0; i < 1000; ++i) {
+            if (i % 2 == 0) {
+                auto score = store.zscore("key3", "member" + std::to_string(thread_id));
+                if (score) {
+                    successful_ops++;
+                }
+            } else {
+                if (store.zadd("key3", static_cast<double>(i), "member" + std::to_string(thread_id))) {
+                    successful_ops++;
+                }
+            }
+        }
+    };
+
+    std::vector<std::thread> threads;
+    for (int i = 0; i < 10; ++i) {
+        threads.emplace_back(mixed_func, i);
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    std::cout << "Successful operations: " << successful_ops << std::endl;
+
+    auto result = store.zquery("key3", 0, "", std::numeric_limits<double>::max(), "", 0, 1000);
+    std::cout << "Final size of key3: " << result.size() << std::endl;
+
+    EXPECT_GE(successful_ops, 5000);
+    EXPECT_EQ(result.size(), 10); // We expect 10 members, one for each thread
+
+    // Verify that all members are present
+    std::set<std::string> expected_members;
+    for (int i = 0; i < 10; ++i) {
+        expected_members.insert("member" + std::to_string(i));
+    }
+
+    std::set<std::string> actual_members;
+    for (const auto& pair : result) {
+        actual_members.insert(pair.first);
+    }
+
+    EXPECT_EQ(expected_members, actual_members);
+}
+
+TEST_F(DataStoreThreadTest, ConcurrentRangeOperations) {
+
+    for (int i = 0; i < 1000; ++i) {
+        store.zadd("key4", static_cast<double>(i), "member" + std::to_string(i));
+    }
+
+    std::atomic<int> successful_ops(0);
+
+    auto range_func = [&]() {
+        auto result = store.zquery("key4", 0, "", 1000, "", 0, 100);
+        if (result.size() == 100) {
+            successful_ops++;
+        }
+    };
+
+    auto range_del_func = [&]() {
+        store.zrange_del("key4", 0, 1000, 0, 10);
+        successful_ops++;
+    };
+
+    std::vector<std::thread> threads;
+    for (int i = 0; i < 8; ++i) {
+        threads.emplace_back(range_func);
+    }
+    for (int i = 0; i < 2; ++i) {
+        threads.emplace_back(range_del_func);
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    EXPECT_GE(successful_ops, 8);
 }
 
 int main(int argc, char **argv) {
